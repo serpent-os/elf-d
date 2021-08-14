@@ -57,3 +57,19 @@ align(1):
 	ubyte other;
 	ELF32_Section shndx;
 }
+
+/**
+ * An ELF32L .dynamic section contains an ELFDynEntry32L[] (_DYNAMIC array in elf.h).
+ *
+ * Depending on dTag, DUnion will interpreted as a 32bit unsigned int or a 32bit address.
+ */
+align(1) struct ELFDynEntry32L {
+align(1):
+	ELF32_SWord dTag;
+	ELF32_Word content;
+	// Handle this at a higher level and just use content instead for now
+	// union DUnion {
+	//	ELF32_Word dVal;
+	//	ELF32_Addr dPtr;
+	//}
+}

@@ -95,7 +95,7 @@ enum SectionType : ELF_Word {
 	stringTable = 0x0000_0003,
 	relocation = 0x0000_0004,
 	symbolHashTable = 0x0000_0005,
-	dynamicLinkingTable =	0x0000_0006,
+	dynamicLinkingTable = 0x0000_0006,
 	note = 0x0000_0007,
 	noBits = 0x0000_0008,
 	rel = 0x0000_0009,
@@ -126,4 +126,16 @@ enum TargetISA : ELF_Word {
 	ia64 = 0x32,
 	x86_64 = 0x3E,
 	aarch64 = 0xB7,
+}
+
+/**
+ * Non-exhaustive list of legal values for d_tag (.dynamic section tag for entries)
+ *
+ * See /usr/include/elf.h for details.
+ */
+enum DynTag : uint {
+	NULL = 0,
+	NEEDED = 1,
+	SONAME = 14,
+	SYMBOLIC = 16
 }

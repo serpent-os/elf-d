@@ -59,3 +59,19 @@ align(1):
 	ELF64_Addr value;
 	ELF64_XWord size;
 }
+
+/**
+ * An ELF64L .dynamic section contains an ELFDynEntry64L[] (_DYNAMIC array in elf.h).
+ *
+ * Depending on dTag, DUnion will interpreted as a 64bit unsigned int or a 64bit address.
+ */
+align(1) struct ELFDynEntry64L {
+align(1):
+	ELF64_SXword dTag;
+	ELF64_XWord content;
+	// Handle this at a higher level and just use content for now
+	// union DUnion {
+	//	ELF64_XWord dVal;
+	//	ELF64_Addr dPtr;
+	//}
+}
