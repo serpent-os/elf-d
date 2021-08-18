@@ -5,6 +5,7 @@
 
 module elf.sections;
 
+public import elf.sections.dynamiclinkingtable;
 public import elf.sections.stringtable;
 public import elf.sections.symboltable;
 public import elf.sections.debugline;
