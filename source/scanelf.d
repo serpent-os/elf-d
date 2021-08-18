@@ -10,16 +10,17 @@
  */
 
 import std.algorithm;
+import std.array;
 import std.exception;
 import std.file;
+import std.range;
 import std.format : format;
 import std.path : baseName;
-import std.range : InputRange, only, walkLength;
 import std.stdio : writefln, writeln;
 import std.string : strip;
 import std.typecons : Nullable;
 
-import elf, elf.low, elf.low32, elf.low64, elf.meta, elf.sections, elf.sections.dynamiclinkingtable;
+import elf, elf.low, elf.low32, elf.low64, elf.meta, elf.sections;
 
 static if (__VERSION__ >= 2079)
 	alias elfEnforce = enforce!ELFException;
@@ -43,7 +44,6 @@ void main(string[] args) {
 		return;
 	}
 }
-
 
 /**
  * Match any regular files in path which appear to be ELF files
@@ -69,7 +69,6 @@ void listElfFiles(const(string) path) {
 	}
 }
 
-
 private void _parseElfFile(DirEntry f) {
 	try { // if we've made it here, it's a genuine file
 		ELF elf = ELF.fromFile(f.name);
@@ -78,6 +77,9 @@ private void _parseElfFile(DirEntry f) {
 		//printSectionNames(elf);
 		//printSectionInfo(elf);
 		//printSymbolTables(elf);
+
+		/* Show build-id (used for naming debug packages when we split and strip symbols) */
+		string buildId = printBuildId(elf, f.name);
 
 		/* Show link-time dependencies per dynamic shared object */
 		string soname = printDynamicLinkingSection(elf, f.name);
@@ -93,6 +95,49 @@ private void _parseElfFile(DirEntry f) {
 	}
 }
 
+/**
+ * Print .note.gnu.build-id section if it exists (it should).
+ *
+ * If the section doesn't exist, we can't name split-out debug files properly.
+ */
+string printBuildId(ELF elf, const string pathname) {
+	string buildId = "N/A";
+	Nullable!ELFSection nes = elf.getSection(".note.gnu.build-id");
+	if (!nes.isNull) {
+		try {
+			ELFSection es = nes.get;
+			if (es.type == SectionType.note) {
+				static immutable uint NT_GNU_BUILD_ID = 3;
+				/* ASCII hex string for "GNU\0" */
+				static immutable auto GNU = [71,   78,   85, 0];
+				/* The compiler is smart enough that it can auto-convert uint sizes to ubyte indices */
+				auto noteHeader = *cast(ELFNoteHeaderL*) es.contents[0 .. ELFNoteHeaderL.sizeof];
+				const auto noteNameArray = es.contents[
+					ELFNoteHeaderL.sizeof .. ELFNoteHeaderL.sizeof + noteHeader.noteNameSize];
+				/* While this may look like dark magic, it actually just creates a nice hex-formatted string */
+				// const auto noteName = join(noteNameArray.map!(ub => "%02x".format(ub)));
+				// writeln("noteName: ", noteName);
+				if (noteHeader.noteType == NT_GNU_BUILD_ID && noteHeader.noteNameSize == 4 && noteNameArray == GNU) {
+					/* Skip past the noteName (which will always be GNU on Linux) */
+					const uint descriptorStartIndex = cast(uint) ELFNoteHeaderL.sizeof + noteHeader.noteNameSize;
+					/* We _really_ don't want to read past the section end */
+					const uint descriptorEndIndex = descriptorStartIndex + noteHeader.noteDescriptorSize;
+					enforce(descriptorEndIndex == es.contents.length,
+						"Read past end of section .note.gnu.build-id.contents()!");
+					const auto hashArray = es.contents[descriptorStartIndex .. descriptorEndIndex];
+					/* Convert each ubyte to hex format, then concatenate array to single buildId hash string */
+					buildId = join(hashArray.map!(ub => "%02x".format(ub)));
+				}
+			}
+		}
+		catch(Exception ex) {
+			// writeln(ex);
+		}
+	}
+	writeln("\n", baseName(pathname), ":");
+	writeln("Build_ID:\n\t", buildId);
+	return buildId;
+}
 
 /**
  * Print selected Dynamic Linking section contents
@@ -101,24 +146,25 @@ string printDynamicLinkingSection(ELF elf, const string filepath) {
 	// Maybe insert some kind of check here?
 	// What kind of check could be useful?
 	string soname = "unknown";
-	const string filename = baseName(filepath);
 	string section = ".dynamic";
 	Nullable!ELFSection nes = elf.getSection(section);
 	if (!nes.isNull) {
 		ELFSection es = nes.get;
 		if (es.type == SectionType.dynamicLinkingTable) { /* ds assignment shouldn't fail here */
-			auto ds = DynamicLinkingTable(es);
+			auto dt = DynamicLinkingTable(es);
 			//writeln("  Current Section name: ", es.name);
 			//writeln("  Current Section info: ", es.info);
 			//writeln("  Current Section type: ", es.type);
-			if (ds.soname == "") {
-				soname = filename;
+			if (dt.soname == "") {
+				soname = baseName(filepath);
 			} else {
-				soname = ds.soname;
+				soname = dt.soname;
 			}
-			writefln("%s depends on:", soname);
-			foreach (lib; ds.needed.map!(s => format("\t%s", s))) {
-					 writeln(lib);
+			/* FIXME: We need a stable sort here to avoid noise if shared objects switch places in the section */
+			auto sortedLibs = dt.needed.sort!("a < b");
+			writeln("NEEDED_libs:");
+			foreach (lib; sortedLibs) {
+					 writeln("\t", lib);
 			}
 			//writeln("  Current Section contents:\n", es.contents);
 		}
@@ -128,28 +174,33 @@ string printDynamicLinkingSection(ELF elf, const string filepath) {
 	return soname;
 }
 
-
 /**
  * Print a tab-prefixed, newline delimited list of exported ELF symbols
  */
 void printDefinedSymbols(ELF elf, string name) {
-	writefln("%s provides these symbols:", name);
+	writeln("ABI_exports:");
 	foreach (section; only(".symtab", ".dynsym",))
     {
-	// string section = ".dynsym";
 		Nullable!ELFSection nes = elf.getSection(section);
 		if (!nes.isNull) {
 			try {
 				ELFSection es = nes.get;
 				auto symbolTable = SymbolTable(es).symbols();
-				/* a section index of 0 means that the symbol is undefined */
-				auto definedSymbols = symbolTable.filter!(es => es.sectionIndex != 0)
-					.filter!(sym => sym.binding == SymbolBinding.global)
-					.filter!(sym => (sym.type == SymbolType.func || sym.type == SymbolType.object));
-				writefln("%-(\t%s\n%)", // may need a filter that excludes weak symbols here too?
-						// "[%s\t%-6s]\t%s".format(es.binding, es.type, es.name)
-						definedSymbols.map!(es => "%s".format(es.name)));
-				//writeln(SymbolTable(es).symbols());
+				/* In terms of exported ABI, we only care about checking for global functions */
+				auto definedSymbols = symbolTable.filter!(
+					sym => sym.sectionIndex != 0
+					&& sym.type == SymbolType.func
+					&& sym.binding == SymbolBinding.global);
+				/* Using .map! puts us in type hell (been there, done that, got the T-Shirt) so KISS */
+				string[] sortedDefinedSymbols;
+				/* Dear compiler, please make this a reference type dynamic array now ... */
+				foreach (sym; definedSymbols) {
+					sortedDefinedSymbols ~= sym.name;
+				}
+				sortedDefinedSymbols.sort;
+				foreach (sym; sortedDefinedSymbols) {
+					writeln("\t", sym);
+				}
 			} catch (Exception ex) {
 				writeln("'- caught an exception in ", __FILE__, ":L", __LINE__);
 				//writeln(ex);
@@ -168,7 +219,7 @@ void printDefinedSymbols(ELF elf, string name) {
  * objects at runtime.
  */
 void printUndefinedSymbols(ELF elf, string name) {
-	writefln("%s needs these symbols:", name);
+	writeln("ABI_imports:");
 	foreach (section; only(".symtab", ".dynsym",))
 	{
 		Nullable!ELFSection nes = elf.getSection(section);
@@ -176,13 +227,23 @@ void printUndefinedSymbols(ELF elf, string name) {
 			try {
 				ELFSection es = nes.get;
 				auto symbolTable = SymbolTable(es).symbols();
-				auto undefinedSymbols = symbolTable.filter!(es => es.sectionIndex == 0);
-					// .sort!"a < b";
-					// .filter(sym => sym.name != "");
-					// .filter!(sym => sym.binding == SymbolBinding.global)
-					//.filter!(sym => sym.type == SymbolType.func || sym.type == SymbolType.object);
-				writefln("%-(\t%s\n%)",
-				    undefinedSymbols.map!(s => "%s".format(s.name)));
+				/* In terms of imported ABI, we need to know global and weak function references to undefined symbols */
+				auto undefinedSymbols = symbolTable.filter!(
+					sym => sym.sectionIndex == 0
+					&& sym.type == SymbolType.func
+					&& (sym.binding == SymbolBinding.global || sym.binding == SymbolBinding.weak));
+				/* Using .map! puts us in type hell (been there, done that, got the T-Shirt) so KISS */
+				string[] sortedUndefinedSymbols;
+				/* Dear compiler, please make this a reference type dynamic array now ... */
+				foreach (sym; undefinedSymbols) {
+					sortedUndefinedSymbols ~= sym.name;
+				}
+				sortedUndefinedSymbols.sort;
+				foreach (sym; sortedUndefinedSymbols) {
+					writeln("\t", sym);
+				}
+				//writefln("%-(\t%s\n%)",
+				//	undefinedSymbols.map!(s => s.name));
 			} catch (Exception ex) {
 				writeln("'- caught an exception in ", __FILE__, ":L", __LINE__);
 				//writeln(ex);
@@ -306,4 +367,3 @@ bool isElf(const(DirEntry) file, const(bool) dbg = false) {
 		return false;
 	}
 }
-
