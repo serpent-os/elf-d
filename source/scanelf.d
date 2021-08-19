@@ -29,10 +29,10 @@ else
 
 
 void main(string[] args) {
-	// Do we have other arguments than args[0] (= the name of the present file)?
+	// Do we have other arguments than the name of the present file (args[0])?
 	if (args.length > 1) {
 		// writeln("args: ", args);
-		// we're not interested in the present file (args[0])
+		// we're only interested in actual arguments (args[1] and onwards)
 		foreach (a; args[1 .. $]) {
 			// writeln("=== Checking for ELF data in ", a, " ...");
 			listElfFiles(a);
@@ -79,10 +79,10 @@ private void _parseElfFile(DirEntry f) {
 		//printSymbolTables(elf);
 
 		/* Show build-id (used for naming debug packages when we split and strip symbols) */
-		string buildId = printBuildId(elf, f.name);
+		immutable string buildId = printBuildId(elf, f.name);
 
 		/* Show link-time dependencies per dynamic shared object */
-		string soname = printDynamicLinkingSection(elf, f.name);
+		immutable string soname = printDynamicLinkingSection(elf, f.name);
 
 		/* Show exported (= defined) symbols (functions/variables) */
 		printDefinedSymbols(elf, soname);
@@ -90,7 +90,7 @@ private void _parseElfFile(DirEntry f) {
 		/* Show undefined symbols (functions/variables) depended on and imported at link-time */
 		printUndefinedSymbols(elf, soname);
 	} catch (Exception ex) {
-		writeln("Not an ELF file: ", f.name);
+		// writeln("Not an ELF file: ", f.name);
 		// writeln(ex);
 	}
 }
@@ -100,7 +100,7 @@ private void _parseElfFile(DirEntry f) {
  *
  * If the section doesn't exist, we can't name split-out debug files properly.
  */
-string printBuildId(ELF elf, const string pathname) {
+string printBuildId(ELF elf, const(string) pathname) {
 	string buildId = "N/A";
 	Nullable!ELFSection nes = elf.getSection(".note.gnu.build-id");
 	if (!nes.isNull) {
@@ -119,9 +119,9 @@ string printBuildId(ELF elf, const string pathname) {
 				// writeln("noteName: ", noteName);
 				if (noteHeader.noteType == NT_GNU_BUILD_ID && noteHeader.noteNameSize == 4 && noteNameArray == GNU) {
 					/* Skip past the noteName (which will always be GNU on Linux) */
-					const uint descriptorStartIndex = cast(uint) ELFNoteHeaderL.sizeof + noteHeader.noteNameSize;
+					immutable uint descriptorStartIndex = cast(uint) ELFNoteHeaderL.sizeof + noteHeader.noteNameSize;
 					/* We _really_ don't want to read past the section end */
-					const uint descriptorEndIndex = descriptorStartIndex + noteHeader.noteDescriptorSize;
+					immutable uint descriptorEndIndex = descriptorStartIndex + noteHeader.noteDescriptorSize;
 					enforce(descriptorEndIndex == es.contents.length,
 						"Read past end of section .note.gnu.build-id.contents()!");
 					const auto hashArray = es.contents[descriptorStartIndex .. descriptorEndIndex];
@@ -142,11 +142,11 @@ string printBuildId(ELF elf, const string pathname) {
 /**
  * Print selected Dynamic Linking section contents
  */
-string printDynamicLinkingSection(ELF elf, const string filepath) {
+string printDynamicLinkingSection(ELF elf, const(string) filepath) {
 	// Maybe insert some kind of check here?
 	// What kind of check could be useful?
 	string soname = "unknown";
-	string section = ".dynamic";
+	immutable string section = ".dynamic";
 	Nullable!ELFSection nes = elf.getSection(section);
 	if (!nes.isNull) {
 		ELFSection es = nes.get;
@@ -160,7 +160,7 @@ string printDynamicLinkingSection(ELF elf, const string filepath) {
 			} else {
 				soname = dt.soname;
 			}
-			/* FIXME: We need a stable sort here to avoid noise if shared objects switch places in the section */
+			/* We need a stable sort here to avoid noise if shared objects switch places in the section */
 			auto sortedLibs = dt.needed.sort!("a < b");
 			writeln("NEEDED_libs:");
 			foreach (lib; sortedLibs) {
@@ -177,7 +177,7 @@ string printDynamicLinkingSection(ELF elf, const string filepath) {
 /**
  * Print a tab-prefixed, newline delimited list of exported ELF symbols
  */
-void printDefinedSymbols(ELF elf, string name) {
+void printDefinedSymbols(ELF elf, const(string) name) {
 	writeln("ABI_exports:");
 	foreach (section; only(".symtab", ".dynsym",))
     {
@@ -218,7 +218,7 @@ void printDefinedSymbols(ELF elf, string name) {
  * Undefined symbols are the symbols that need to be loaded from other ELF shared
  * objects at runtime.
  */
-void printUndefinedSymbols(ELF elf, string name) {
+void printUndefinedSymbols(ELF elf, const(string) name) {
 	writeln("ABI_imports:");
 	foreach (section; only(".symtab", ".dynsym",))
 	{
@@ -324,7 +324,6 @@ void printSymbolTables(ELF elf) {
 		if (!nes.isNull) {
 			ELFSection es = nes.get;
 			writeln("  Symbol table ", section, " contains: ", SymbolTable(es).symbols().walkLength());
-
 			writefln("%-(    %s\n%)", SymbolTable(es).symbols()
 					.map!(es => "%s\t%s\t%s\t(%s)".format(es.binding, es.type, es.name, es.sectionIndex)));
 			writeln();
