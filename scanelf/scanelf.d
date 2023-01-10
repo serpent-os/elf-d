@@ -145,10 +145,17 @@ void printDefinedSymbols(ELF elf, string name) {
 				auto definedSymbols = symbolTable.filter!(es => es.sectionIndex != 0)
 					.filter!(sym => sym.binding == SymbolBinding.global)
 					.filter!(sym => (sym.type == SymbolType.func || sym.type == SymbolType.object));
+				auto sortedDefinedSymbolNames = definedSymbols.map!(s => format!"%s"(s.name)).array.sort;
+				/*
 				writefln("%-(\t%s\n%)", // may need a filter that excludes weak symbols here too?
 						// "[%s\t%-6s]\t%s".format(es.binding, es.type, es.name)
-						definedSymbols.map!(es => "%s".format(es.name)));
+						definedSymbols.map!(s => "%s".format(s.name)));
 				//writeln(SymbolTable(es).symbols());
+				*/
+				foreach (sym; sortedDefinedSymbolNames)
+				{
+					writefln!"\t%s"(sym);
+				}
 			} catch (Exception ex) {
 				writeln("'- caught an exception in ", __FILE__, ":L", __LINE__);
 				//writeln(ex);
