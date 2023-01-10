@@ -145,7 +145,7 @@ void printDefinedSymbols(ELF elf, string name) {
 				auto definedSymbols = symbolTable.filter!(es => es.sectionIndex != 0)
 					.filter!(sym => sym.binding == SymbolBinding.global)
 					.filter!(sym => (sym.type == SymbolType.func || sym.type == SymbolType.object));
-				auto sortedDefinedSymbolNames = definedSymbols.map!(s => format!"%s"(s.name)).array.sort;
+				auto sortedDefinedSymbolNames = definedSymbols.map!(s => format!"%s"(s.name)).array.sort();
 				/*
 				writefln("%-(\t%s\n%)", // may need a filter that excludes weak symbols here too?
 						// "[%s\t%-6s]\t%s".format(es.binding, es.type, es.name)
@@ -175,6 +175,7 @@ void printDefinedSymbols(ELF elf, string name) {
  */
 void printUndefinedSymbols(ELF elf, string name) {
 	writefln("%s needs these symbols:", name);
+	// TODO: Figure out which of these has symbol versioning!
 	foreach (section; only(".symtab", ".dynsym",))
 	{
 		Nullable!ELFSection nes = elf.getSection(section);
@@ -187,8 +188,19 @@ void printUndefinedSymbols(ELF elf, string name) {
 					// .filter(sym => sym.name != "");
 					// .filter!(sym => sym.binding == SymbolBinding.global)
 					//.filter!(sym => sym.type == SymbolType.func || sym.type == SymbolType.object);
+				auto sortedUndefinedSymbols = undefinedSymbols.map!(s => format!"%s"(s.name)).array.sort();
+				/*
 				writefln("%-(\t%s\n%)",
 				    undefinedSymbols.map!(s => "%s".format(s.name)));
+				*/
+				// TODO: Why do I get an empty (first) line?
+				//       Is that to do with termination of the section?
+				//       i.e. empty line which when sorted is first?
+				foreach (sym; sortedUndefinedSymbols)
+				{
+					writefln!"\t%s"(sym);
+				}
+
 			} catch (Exception ex) {
 				writeln("'- caught an exception in ", __FILE__, ":L", __LINE__);
 				//writeln(ex);
