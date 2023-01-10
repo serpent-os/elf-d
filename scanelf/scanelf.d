@@ -8,6 +8,7 @@
  */
 
 import std.algorithm;
+import std.array;
 import std.exception;
 import std.file;
 import std.format : format;
@@ -115,7 +116,7 @@ string printDynamicLinkingSection(ELF elf, const string filepath) {
 				soname = ds.soname;
 			}
 			writefln("%s depends on:", soname);
-			foreach (lib; ds.needed.map!(s => format("\t%s", s))) {
+			foreach (lib; ds.needed.map!(s => format("\t%s", s)).array.sort) {
 					 writeln(lib);
 			}
 			//writeln("  Current Section contents:\n", es.contents);
