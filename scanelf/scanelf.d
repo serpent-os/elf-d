@@ -1,4 +1,5 @@
-//          Copyright © Serpent OS Developers 2021-22.
+//          Copyright © Serpent OS Developers 2021-23.
+//      Includes example code Copyright © Yazan Dabain 2014.
 // Distributed under the Boost Software License, Version 1.0.
 //    (See accompanying file LICENSE_1_0.txt or copy at
 //          http://www.boost.org/LICENSE_1_0.txt)
@@ -38,7 +39,7 @@ void main(string[] args) {
 	} else {
 		// writeln("=== Defaulting to checking for ELF data in /usr/lib/libc.so.6 ...");
 		// listElfFiles("/usr/lib/libc.so.6");
-		writefln("Usage: ./%s \"file-or-path-to-recursively-check-for-ELF-contents\" [path path ...]", baseName(args[0]));
+		writefln!"Usage: ./%s \"file-or-path-to-recursively-check-for-ELF-contents\" [path path ...]"( baseName(args[0]));
 		return;
 	}
 }
@@ -105,7 +106,8 @@ string printDynamicLinkingSection(ELF elf, const string filepath) {
 	Nullable!ELFSection nes = elf.getSection(section);
 	if (!nes.isNull) {
 		ELFSection es = nes.get;
-		if (es.type == SectionType.dynamicLinkingTable) { /* ds assignment shouldn't fail here */
+		if (es.type == SectionType.dynamicLinkingTable) {
+			/* ds assignment shouldn't fail here */
 			auto ds = DynamicLinkingTable(es);
 			//writeln("  Current Section name: ", es.name);
 			//writeln("  Current Section info: ", es.info);
@@ -115,8 +117,8 @@ string printDynamicLinkingSection(ELF elf, const string filepath) {
 			} else {
 				soname = ds.soname;
 			}
-			writefln("%s depends on:", soname);
-			foreach (lib; ds.needed.map!(s => format("\t%s", s)).array.sort) {
+			writefln!"%s depends on:"(soname);
+			foreach (lib; ds.needed.map!(s => format!"\t%s"(s)).array.sort()) {
 					 writeln(lib);
 			}
 			//writeln("  Current Section contents:\n", es.contents);
@@ -132,10 +134,10 @@ string printDynamicLinkingSection(ELF elf, const string filepath) {
  * Print a tab-prefixed, newline delimited list of exported ELF symbols
  */
 void printDefinedSymbols(ELF elf, string name) {
-	writefln("%s provides these symbols:", name);
+	writefln!"%s provides these symbols:"(name);
 	foreach (section; only(".symtab", ".dynsym",))
     {
-	// string section = ".dynsym";
+		// string section = ".dynsym";
 		Nullable!ELFSection nes = elf.getSection(section);
 		if (!nes.isNull) {
 			try {
@@ -147,6 +149,7 @@ void printDefinedSymbols(ELF elf, string name) {
 					.filter!(sym => (sym.type == SymbolType.func || sym.type == SymbolType.object));
 				auto sortedDefinedSymbolNames = definedSymbols.map!(s => format!"%s"(s.name)).array.sort();
 				/*
+				// This is pretty janky. Was likely needed due to traversing char-based arrays
 				writefln("%-(\t%s\n%)", // may need a filter that excludes weak symbols here too?
 						// "[%s\t%-6s]\t%s".format(es.binding, es.type, es.name)
 						definedSymbols.map!(s => "%s".format(s.name)));
@@ -174,8 +177,9 @@ void printDefinedSymbols(ELF elf, string name) {
  * objects at runtime.
  */
 void printUndefinedSymbols(ELF elf, string name) {
-	writefln("%s needs these symbols:", name);
-	// TODO: Figure out which of these has symbol versioning!
+	writefln!"%s needs these symbols:"(name);
+	// .symtab section has symbol versioning applied when looking at .name properties
+	// while .dynsym does not.
 	foreach (section; only(".symtab", ".dynsym",))
 	{
 		Nullable!ELFSection nes = elf.getSection(section);
@@ -227,7 +231,7 @@ void printHeaderInfo(ELF elf) {
 	writeln("  objectFileType: ", elf.header.objectFileType);
 	writeln("  machineISA: ", elf.header.machineISA);
 	writeln("  version_: ", elf.header.version_);
-	writefln("  entryPoint: 0x%x", elf.header.entryPoint);
+	writefln!"  entryPoint: 0x%x"(elf.header.entryPoint);
 	writeln("  programHeaderOffset: ", elf.header.programHeaderOffset);
 	writeln("  sectionHeaderOffset: ", elf.header.sectionHeaderOffset);
 	writeln("  sizeOfProgramHeaderEntry: ", elf.header.sizeOfProgramHeaderEntry);
@@ -246,12 +250,12 @@ void printSectionInfo(ELF elf) {
 	// ELF sections
 	foreach (section; elf.sections) {
 		writeln("  Section (", section.name, ")");
-		writefln("    type: %s", section.type);
-		writefln("    address: 0x%x", section.address);
-		writefln("    offset: 0x%x", section.offset);
-		writefln("    flags: 0x%08b", section.flags);
-		writefln("    size: %s bytes", section.size);
-		writefln("    entry size: %s bytes", section.entrySize);
+		writefln!"    type: %s"(section.type);
+		writefln!"    address: 0x%x"(section.address);
+		writefln!"    offset: 0x%x"(section.offset);
+		writefln!"    flags: 0x%08b"(section.flags);
+		writefln!"    size: %s bytes"(section.size);
+		writefln!"    entry size: %s bytes"(section.entrySize);
 		writeln();
 	}
 }
@@ -273,8 +277,7 @@ void printSectionNames(ELF elf) {
  * Print a list of symbol table sections for ELF file
  */
 void printSymbolTables(ELF elf) {
-	writeln();
-	writeln("Symbol table sections contents:");
+	writeln("\nSymbol table sections contents:");
 
 	foreach (section; only(".symtab", ".dynsym",)) {
 		Nullable!ELFSection nes = elf.getSection(section);
@@ -283,7 +286,7 @@ void printSymbolTables(ELF elf) {
 			writeln("  Symbol table ", section, " contains: ", SymbolTable(es).symbols().walkLength());
 
 			writefln("%-(    %s\n%)", SymbolTable(es).symbols()
-					.map!(es => "%s\t%s\t%s\t(%s)".format(es.binding, es.type, es.name, es.sectionIndex)));
+					.map!(es => format!"%s\t%s\t%s\t(%s)"(es.binding, es.type, es.name, es.sectionIndex)));
 			writeln();
 		}
 	}
@@ -314,7 +317,7 @@ bool isElf(const(DirEntry) file, const(bool) dbg = false) {
 		// return true;
 		const auto first4Bytes = cast(ubyte[]) read(file.name, 4);
 		if (dbg) {
-			writefln("%s: %s", file.name, first4Bytes);
+			writefln!"%s: %s"(file.name, first4Bytes);
 		}
 		return first4Bytes == elfHeader && file.name.length >= 16;
 	} catch (Exception ex) {
