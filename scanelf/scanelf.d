@@ -1,5 +1,5 @@
-//          Copyright © Serpent OS Developers 2021-23.
-//      Includes example code Copyright © Yazan Dabain 2014.
+//        Copyright © Serpent OS Developers 2021-23.
+//    Includes example code Copyright © Yazan Dabain 2014.
 // Distributed under the Boost Software License, Version 1.0.
 //    (See accompanying file LICENSE_1_0.txt or copy at
 //          http://www.boost.org/LICENSE_1_0.txt)
@@ -28,7 +28,7 @@ else
 
 
 void main(string[] args) {
-	// Do we have other arguments than args[0] (= the name of the present file)?
+	// Do we have other arguments than the name of the present file (args[0])?
 	if (args.length > 1) {
 		// writeln("args: ", args);
 		// we're not interested in the present file (args[0])
@@ -49,7 +49,7 @@ void main(string[] args) {
  * Match any regular files in path which appear to be ELF files
  */
 void listElfFiles(const(string) path) {
-	auto sPath = path.strip;
+	auto sPath = path.strip();
 	//writeln("listElfFiles( ", sPath, " );");
 	try {
 		if (sPath.isFile) {
@@ -79,6 +79,9 @@ private void _parseElfFile(DirEntry f) {
 		//printSectionInfo(elf);
 		//printSymbolTables(elf);
 
+		/* Show build-id (used for naming debug packages when we split and strip symbols) */
+		immutable string buildId = printBuildId(elf, f.name);
+
 		/* Show link-time dependencies per dynamic shared object */
 		string soname = printDynamicLinkingSection(elf, f.name);
 
@@ -93,6 +96,50 @@ private void _parseElfFile(DirEntry f) {
 	}
 }
 
+/**
+ * Print .note.gnu.build-id section if it exists (it should).
+ *
+ * If the section doesn't exist, we can't name split-out debug files properly.
+ */
+string printBuildId(ELF elf, const(string) pathname) {
+	string buildId = "N/A";
+	Nullable!ELFSection nes = elf.getSection(".note.gnu.build-id");
+	if (!nes.isNull) {
+		try {
+			ELFSection es = nes.get;
+			if (es.type == SectionType.note) {
+				static immutable uint NT_GNU_BUILD_ID = 3;
+				/* ASCII hex string for "GNU\0" */
+				static immutable auto GNU = [71,   78,   85, 0];
+				/* The compiler is smart enough that it can auto-convert uint sizes to ubyte indices */
+				auto noteHeader = *cast(ELFNoteHeaderL*) es.contents[0 .. ELFNoteHeaderL.sizeof];
+				const auto noteNameArray = es.contents[
+					ELFNoteHeaderL.sizeof .. ELFNoteHeaderL.sizeof + noteHeader.noteNameSize];
+				/* While this may look like dark magic, it actually just creates a nice hex-formatted string */
+				// const auto noteName = join(noteNameArray.map!(ub => "%02x".format(ub)));
+				// writeln("noteName: ", noteName);
+				if (noteHeader.noteType == NT_GNU_BUILD_ID && noteHeader.noteNameSize == 4 && noteNameArray == GNU) {
+					/* Skip past the noteName (which will always be GNU on Linux) */
+					immutable uint descriptorStartIndex = cast(uint) ELFNoteHeaderL.sizeof + noteHeader.noteNameSize;
+					/* We _really_ don't want to read past the section end */
+					immutable uint descriptorEndIndex = descriptorStartIndex + noteHeader.noteDescriptorSize;
+					enforce(descriptorEndIndex == es.contents.length,
+						"Read past end of section .note.gnu.build-id.contents()!");
+					const auto hashArray = es.contents[descriptorStartIndex .. descriptorEndIndex];
+					/* Convert each ubyte to hex format, then concatenate array to single buildId hash string */
+					buildId = join(hashArray.map!(ub => "%02x".format(ub)));
+				}
+			}
+		}
+		catch(Exception ex) {
+			// writeln(ex);
+		}
+	}
+	writeln("\n", baseName(pathname), ":");
+	writeln("Build_ID:\n\t", buildId);
+	return buildId;
+}
+
 
 /**
  * Print selected Dynamic Linking section contents
@@ -101,25 +148,25 @@ string printDynamicLinkingSection(ELF elf, const string filepath) {
 	// Maybe insert some kind of check here?
 	// What kind of check could be useful?
 	string soname = "unknown";
-	const string filename = baseName(filepath);
 	string section = ".dynamic";
 	Nullable!ELFSection nes = elf.getSection(section);
 	if (!nes.isNull) {
 		ELFSection es = nes.get;
 		if (es.type == SectionType.dynamicLinkingTable) {
-			/* ds assignment shouldn't fail here */
-			auto ds = DynamicLinkingTable(es);
+			/* dt assignment shouldn't fail here */
+			auto dt = DynamicLinkingTable(es);
 			//writeln("  Current Section name: ", es.name);
 			//writeln("  Current Section info: ", es.info);
 			//writeln("  Current Section type: ", es.type);
-			if (ds.soname == "") {
-				soname = filename;
+			if (dt.soname == "") {
+				soname = baseName(filepath);
 			} else {
-				soname = ds.soname;
+				soname = dt.soname;
 			}
-			writefln!"%s depends on:"(soname);
-			foreach (lib; ds.needed.map!(s => format!"\t%s"(s)).array.sort()) {
-					 writeln(lib);
+			auto sortedLibs = dt.needed.sort!("a < b");
+			writeln("NEEDED_libs:");
+			foreach (lib; sortedLibs) {
+				writefln!"\t%s"(lib);
 			}
 			//writeln("  Current Section contents:\n", es.contents);
 		}
@@ -134,29 +181,29 @@ string printDynamicLinkingSection(ELF elf, const string filepath) {
  * Print a tab-prefixed, newline delimited list of exported ELF symbols
  */
 void printDefinedSymbols(ELF elf, string name) {
-	writefln!"%s provides these symbols:"(name);
-	foreach (section; only(".symtab", ".dynsym",))
-    {
-		// string section = ".dynsym";
+	writeln("ABI_exports:");
+	// the .symtab section contains (non-allocable) full symbol table for
+	// use during build time linking and for debugging at runtime.
+	// It is often stripped as it is mostly relevant for build time linking
+	// and debugging purposes
+	foreach (section; only(".symtab", ".dynsym")) {
+		writeln("\t#", section, " section:");
 		Nullable!ELFSection nes = elf.getSection(section);
 		if (!nes.isNull) {
 			try {
 				ELFSection es = nes.get;
 				auto symbolTable = SymbolTable(es).symbols();
 				/* a section index of 0 means that the symbol is undefined */
-				auto definedSymbols = symbolTable.filter!(es => es.sectionIndex != 0)
-					.filter!(sym => sym.binding == SymbolBinding.global)
-					.filter!(sym => (sym.type == SymbolType.func || sym.type == SymbolType.object));
-				auto sortedDefinedSymbolNames = definedSymbols.map!(s => format!"%s"(s.name)).array.sort();
-				/*
-				// This is pretty janky. Was likely needed due to traversing char-based arrays
-				writefln("%-(\t%s\n%)", // may need a filter that excludes weak symbols here too?
-						// "[%s\t%-6s]\t%s".format(es.binding, es.type, es.name)
-						definedSymbols.map!(s => "%s".format(s.name)));
-				//writeln(SymbolTable(es).symbols());
-				*/
-				foreach (sym; sortedDefinedSymbolNames)
-				{
+				auto definedSymbols = symbolTable.filter!(
+					sym => sym.sectionIndex != 0
+					&& sym.name != ""
+					&& sym.binding == SymbolBinding.global
+					&& (sym.type == SymbolType.func || sym.type == SymbolType.object));
+				auto sortedDefinedSymbolNames = definedSymbols.map!(
+					sym => format!"%s"(sym.name))
+					/* .array implements RandomAccessRange interface needed for sort */
+					.array.sort();
+				foreach (sym; sortedDefinedSymbolNames) {
 					writefln!"\t%s"(sym);
 				}
 			} catch (Exception ex) {
@@ -164,9 +211,9 @@ void printDefinedSymbols(ELF elf, string name) {
 				//writeln(ex);
 				// FIXME: should probably log the error?
 			}
-		} //else {
-			//writeln("No section '", section, "' found.");
-		//}
+		} else {
+			writeln("\t (no such ELF section in ", name, ")");
+		}
 	}
 }
 
@@ -177,42 +224,39 @@ void printDefinedSymbols(ELF elf, string name) {
  * objects at runtime.
  */
 void printUndefinedSymbols(ELF elf, string name) {
-	writefln!"%s needs these symbols:"(name);
+	writeln("ABI_imports:");
 	// .symtab section has symbol versioning applied when looking at .name properties
 	// while .dynsym does not.
 	foreach (section; only(".symtab", ".dynsym",))
 	{
+		writeln("\t#", section, " section:");
 		Nullable!ELFSection nes = elf.getSection(section);
 		if (!nes.isNull) {
 			try {
 				ELFSection es = nes.get;
 				auto symbolTable = SymbolTable(es).symbols();
-				auto undefinedSymbols = symbolTable.filter!(es => es.sectionIndex == 0);
-					// .sort!"a < b";
-					// .filter(sym => sym.name != "");
-					// .filter!(sym => sym.binding == SymbolBinding.global)
-					//.filter!(sym => sym.type == SymbolType.func || sym.type == SymbolType.object);
-				auto sortedUndefinedSymbols = undefinedSymbols.map!(s => format!"%s"(s.name)).array.sort();
-				/*
-				writefln("%-(\t%s\n%)",
-				    undefinedSymbols.map!(s => "%s".format(s.name)));
-				*/
-				// TODO: Why do I get an empty (first) line?
-				//       Is that to do with termination of the section?
-				//       i.e. empty line which when sorted is first?
+				/* a section index of 0 means that the symbol is undefined */
+				auto undefinedSymbols = symbolTable.filter!(
+					sym => sym.sectionIndex == 0
+					&& sym.name != ""
+					&& sym.binding == SymbolBinding.global
+					&& (sym.type == SymbolType.func || sym.type == SymbolType.object));
+				auto sortedUndefinedSymbols = undefinedSymbols.map!(
+					sym => format!"%s"(sym.name))
+					/* .array implements RandomAccessRange interface needed for sort */
+					.array.sort();
 				foreach (sym; sortedUndefinedSymbols)
 				{
 					writefln!"\t%s"(sym);
 				}
-
 			} catch (Exception ex) {
 				writeln("'- caught an exception in ", __FILE__, ":L", __LINE__);
 				//writeln(ex);
 				// FIXME: should probably log the error?
 			}
-		} // else {
-		//	writeln("No section '", section, "' found.");
-		//}
+		} else {
+			writeln("\t (no such ELF section in ", name, ")");
+		}
 	}
 }
 
