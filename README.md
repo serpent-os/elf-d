@@ -17,6 +17,16 @@ How to run example
 Run `dub run elf-d:example` in the parent directory. (Note: running the example produces a lot of output to stdout)
 
 
+How to run scanelf
+------------
+
+Run `dub build elf-d:scanelf` in the clone root directory.
+
+After building it, run scanelf with:
+
+    bin/scanelf <path to shared-elf-library.so> |less
+
+
 TODOs
 ------------
 
