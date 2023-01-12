@@ -349,26 +349,3 @@ bool isExecutable(const(uint) permissionBits) pure @nogc nothrow @safe {
 	// writefln("%0b", result);
 	return result > 0;
 }
-
-/**
- * Read the first 4 bytes of a regular file and match contents against ELF magic header
- */
-bool isElf(const(DirEntry) file, const(bool) dbg = false) {
-	static immutable ubyte[] elfHeader = ['\177', 'E', 'L', 'F'];
-	try {
-		// const ELF elf = ELF.fromFile(file);
-		// if the ELF constructor succeeds, it's an elf file
-		// return true;
-		const auto first4Bytes = cast(ubyte[]) read(file.name, 4);
-		if (dbg) {
-			writefln!"%s: %s"(file.name, first4Bytes);
-		}
-		return first4Bytes == elfHeader && file.name.length >= 16;
-	} catch (Exception ex) {
-		if (dbg) {
-			writeln(ex);
-		}
-		return false;
-	}
-}
-
