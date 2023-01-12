@@ -11,6 +11,7 @@
 	"sourcePaths": ["source"],
 
 	"subPackages": [
-		"example"
+		"example",
+		"scanelf"
 	]
 }
